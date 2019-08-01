@@ -10,11 +10,12 @@ import os
 import numpy as np
 import torch
 
-from .dataset import StreamDataset, Dataset, ParallelDataset
+from .dataset import StreamDataset, Dataset, ParallelDataset, StreamDatasetCharacter
 from .dictionary import BOS_WORD, EOS_WORD, PAD_WORD, UNK_WORD, MASK_WORD
 
 
 logger = getLogger()
+import ipdb
 
 
 def process_binarized(data, params):
@@ -101,6 +102,37 @@ def set_dico_parameters(params, data, dico):
         params.mask_index = mask_index
 
 
+def set_dico_parameters_character(params, data, dico):
+    """
+    Update dictionary parameters.
+    """
+    if 'dico' in data:
+        assert data['dico'] == dico
+    else:
+        data['dico'] = dico
+
+    n_words = len(dico)
+    # bos_index = dico.index(BOS_WORD)
+    # eos_index = dico.index(EOS_WORD)
+    # pad_index = dico.index(PAD_WORD)
+    # unk_index = dico.index(UNK_WORD)
+    # mask_index = dico.index(MASK_WORD)
+    if hasattr(params, 'bos_index'):
+        assert params.n_words == n_words
+        # assert params.bos_index == bos_index
+        # assert params.eos_index == eos_index
+        # assert params.pad_index == pad_index
+        # assert params.unk_index == unk_index
+        # assert params.mask_index == mask_index
+    else:
+        params.n_words = n_words
+        # params.bos_index = bos_index
+        # params.eos_index = eos_index
+        # params.pad_index = pad_index
+        # params.unk_index = unk_index
+        # params.mask_index = mask_index
+
+        
 def load_mono_data(params, data):
     """
     Load monolingual data.
@@ -124,11 +156,15 @@ def load_mono_data(params, data):
 
             # load data / update dictionary parameters / update data
             mono_data = load_binarized(params.mono_dataset[lang][splt], params)
+
             set_dico_parameters(params, data, mono_data['dico'])
 
             # create stream dataset
             bs = params.batch_size if splt == 'train' else 1
-            data['mono_stream'][lang][splt] = StreamDataset(mono_data['sentences'], mono_data['positions'], bs, params)
+            if params.data_type == 'word':
+                data['mono_stream'][lang][splt] = StreamDataset(mono_data['sentences'], mono_data['positions'], bs, params)
+            elif params.data_type == 'character':
+                data['mono_stream'][lang][splt] = StreamDatasetCharacter(mono_data['sentences'], bs, params)
 
             # if there are several processes on the same machine, we can split the dataset
             if splt == 'train' and params.split_data and 1 < params.n_gpu_per_node <= data['mono_stream'][lang][splt].n_batches:

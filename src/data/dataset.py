@@ -75,6 +75,70 @@ class StreamDataset(object):
             yield torch.from_numpy(self.data[a:b].astype(np.int64)), self.lengths
 
 
+class StreamDatasetCharacter(object):
+
+    def __init__(self, sent, bs, params):
+        """
+        Prepare batches for data iterator.
+        """
+        bptt = params.bptt
+        self.eos = params.eos_index
+
+        # checks
+        # assert len(pos) == (sent == self.eos).sum()
+        # assert len(pos) == (sent[pos[:, 1]] == self.eos).sum()
+
+        n_tokens = len(sent)
+        n_batches = math.ceil(n_tokens / (bs * bptt))
+        t_size = n_batches * bptt * bs
+
+        buffer = np.zeros(t_size, dtype=sent.dtype) + self.eos
+        # buffer = np.zeros(t_size, dtype=sent.dtype)
+        buffer[t_size - n_tokens:] = sent
+        buffer = buffer.reshape((bs, n_batches * bptt)).T
+        self.data = np.zeros((n_batches * bptt + 1, bs), dtype=sent.dtype) + self.eos
+        # self.data = np.zeros((n_batches * bptt + 1, bs), dtype=sent.dtype)
+        self.data[1:] = buffer
+
+        self.bptt = bptt
+        self.n_tokens = n_tokens
+        self.n_batches = n_batches
+        # self.n_sentences = len(pos)
+        self.n_sentences = 10000 # dummy
+        self.lengths = torch.LongTensor(bs).fill_(bptt)
+
+    def __len__(self):
+        """
+        Number of sentences in the dataset.
+        """
+        return self.n_sentences
+
+    def select_data(self, a, b):
+        """
+        Only select a subset of the dataset.
+        """
+        if not (0 <= a < b <= self.n_batches):
+            logger.warning("Invalid split values: %i %i - %i" % (a, b, self.n_batches))
+            return
+        assert 0 <= a < b <= self.n_batches
+        logger.info("Selecting batches from %i to %i ..." % (a, b))
+
+        # sub-select
+        self.data = self.data[a * self.bptt:b * self.bptt]
+        self.n_batches = b - a
+        self.n_sentences = (self.data == self.eos).sum().item()
+
+    def get_iterator(self, shuffle, subsample=1):
+        """
+        Return a sentences iterator.
+        """
+        indexes = (np.random.permutation if shuffle else range)(self.n_batches // subsample)
+        for i in indexes:
+            a = self.bptt * i
+            b = self.bptt * (i + 1)
+            yield torch.from_numpy(self.data[a:b].astype(np.int64)), self.lengths
+
+            
 class Dataset(object):
 
     def __init__(self, sent, pos, params):

@@ -23,6 +23,7 @@ from .utils import parse_lambda_config, update_lambdas
 from .model.memory import HashingMemory
 from .model.transformer import TransformerFFN
 
+import ipdb
 
 logger = getLogger()
 

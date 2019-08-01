@@ -115,6 +115,8 @@ def get_parser():
                         help="Minimum vocabulary count")
     parser.add_argument("--lg_sampling_factor", type=float, default=-1,
                         help="Language sampling factor")
+    parser.add_argument("--data_type", type=str, default="word",
+                        help="Data type")
 
     # batch parameters
     parser.add_argument("--bptt", type=int, default=256,
