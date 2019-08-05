@@ -297,7 +297,10 @@ def main(params):
         # evaluate perplexity
         scores = evaluator.run_all_evals(trainer)
         trainer.writer.add_scalars(f'clm_en', {'valid_clm_en_ppl': np.mean(scores['valid_en_clm_ppl']),
-                                               'test_clm_en_ppl': np.mean(scores['test_en_clm_ppl'])}, global_step=trainer.n_total_iter)
+                                               'valid_clm_en_bpc': math.log(np.mean(scores['valid_en_clm_ppl']))/math.log(2),
+                                               'test_clm_en_ppl': np.mean(scores['test_en_clm_ppl']),
+                                               'test_clm_en_bpc': math.log(np.mean(scores['test_en_clm_ppl']))/math.log(2)
+                                               }, global_step=trainer.n_total_iter)
 
         # print / JSON log
         for k, v in scores.items():
