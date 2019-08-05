@@ -24,6 +24,7 @@ from .model.memory import HashingMemory
 from .model.transformer import TransformerFFN
 
 import ipdb
+import tensorboardX
 
 logger = getLogger()
 
@@ -34,6 +35,10 @@ class Trainer(object):
         """
         Initialize trainer.
         """
+        
+        # set logger
+        self.writer = tensorboardX.SummaryWriter(logdir=os.path.join('logs', params.dump_path))
+        
         # epoch / iteration size
         self.epoch_size = params.epoch_size
         if self.epoch_size == -1:
@@ -260,6 +265,9 @@ class Trainer(object):
             '{}: {:7.4f}'.format(k, np.mean(v)) for k, v in self.stats.items()
             if type(v) is list and len(v) > 0
         ])
+
+        self.writer.add_scalars(f'clm_en', {'train_clm_en_ppl': np.mean(self.stats['CLM-en'])}, global_step=self.n_total_iter)
+
         for k in self.stats.keys():
             if type(self.stats[k]) is list:
                 del self.stats[k][:]
@@ -282,6 +290,7 @@ class Trainer(object):
 
         # log speed + stats + learning rate
         logger.info(s_iter + s_speed + s_stat + s_lr)
+        
 
     def get_iterator(self, iter_name, lang1, lang2, stream):
         """

@@ -16,7 +16,8 @@ from src.model import check_model_params, build_model
 from src.model.memory import HashingMemory
 from src.trainer import SingleTrainer, EncDecTrainer
 from src.evaluation.evaluator import SingleEvaluator, EncDecEvaluator
-
+import ipdb
+import numpy as np
 
 def get_parser():
     """
@@ -295,6 +296,8 @@ def main(params):
 
         # evaluate perplexity
         scores = evaluator.run_all_evals(trainer)
+        trainer.writer.add_scalars(f'clm_en', {'valid_clm_en_ppl': np.mean(scores['valid_en_clm_ppl']),
+                                               'test_clm_en_ppl': np.mean(scores['test_en_clm_ppl'])}, global_step=trainer.n_total_iter)
 
         # print / JSON log
         for k, v in scores.items():
