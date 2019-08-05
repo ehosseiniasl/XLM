@@ -266,7 +266,7 @@ class Trainer(object):
             if type(v) is list and len(v) > 0
         ])
 
-        self.writer.add_scalars(f'clm_en', {'train_clm_en_ppl': np.mean(self.stats['CLM-en'])}, global_step=self.n_total_iter)
+        self.writer.add_scalars(f'clm_en', {'train_clm_en_ppl': math.exp(np.mean(self.stats['CLM-en']))}, global_step=self.n_total_iter)
         self.writer.add_scalar(f'lr', self.optimizers['model'].param_groups[0]['lr'], global_step=self.n_total_iter)
 
         for k in self.stats.keys():
