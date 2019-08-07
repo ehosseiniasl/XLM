@@ -274,7 +274,8 @@ class Evaluator(object):
         n_valid = 0
 
         # only save states / evaluate usage on the validation set
-        eval_memory = params.use_memory and data_set == 'valid' and self.params.is_master
+        # eval_memory = params.use_memory and data_set == 'valid' and self.params.is_master
+        eval_memory = params.eval_memory
         HashingMemory.EVAL_MEMORY = eval_memory
         if eval_memory:
             all_mem_att = {k: [] for k, _ in self.memory_list}
