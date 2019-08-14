@@ -15,7 +15,11 @@ from src.utils import bool_flag, initialize_exp, set_sampling_probs, shuf_order
 from src.model import check_model_params, build_model
 from src.model.memory import HashingMemory
 from src.trainer import SingleTrainer, EncDecTrainer
+from src.trainer_mem import SingleTrainerMem, EncDecTrainerMem
+from src.trainer_adaptive_span import SingleTrainerAdpSpn, EncDecTrainerAdpSpn
 from src.evaluation.evaluator import SingleEvaluator, EncDecEvaluator
+from src.evaluation.evaluator_mem import SingleEvaluatorMem, EncDecEvaluatorMem
+from src.evaluation.evaluator_adaptive_span import SingleEvaluatorAdpSpn, EncDecEvaluatorAdpSpn
 import ipdb
 import numpy as np
 import math
@@ -219,8 +223,60 @@ def get_parser():
     parser.add_argument("--eval_memory", type=bool, default=False,
                         help="evaluate pkm layer")
 
-    return parser
+    parser.add_argument("--model_type", type=str, default='transformer',
+                        help="model type")
 
+    # Transformer-XL
+    parser.add_argument("--txl_tie_projs", type=bool, default=False,
+                        help="tie projections")
+    parser.add_argument('--div_val', type=int, default=1,
+                        help='divident value for adapative input and softmax')
+    parser.add_argument('--pre_lnorm', action='store_true',
+                        help='apply LayerNorm to the input instead of the output')
+    parser.add_argument('--ext_len', type=int, default=0,
+                        help='length of the extended context')
+    parser.add_argument('--mem_len', type=int, default=0,
+                        help='length of the retained previous heads')
+    parser.add_argument('--cutoffs', default=[], type=list,
+                        help='cutoffs')
+    parser.add_argument('--adapt_inp', type=bool, default=False,
+                        help=' adaptive input')
+    parser.add_argument('--same_length', action='store_true',
+                        help='use the same attn length for all tokens')
+    parser.add_argument('--attn_type', type=int, default=0,
+                        help='attention type. 0 for ours, 1 for Shaw et al,'
+                             '2 for Vaswani et al, 3 for Al Rfou et al.')
+    parser.add_argument('--clamp_len', type=int, default=-1,
+                        help='use the same pos embeddings after clamp_len')
+    parser.add_argument('--sample_softmax', type=int, default=-1,
+                        help='number of samples in sampled softmax')
+    parser.add_argument('--init', default='normal', type=str,
+                        help='parameter initializer to use.')
+    parser.add_argument('--emb_init', default='normal', type=str,
+                              help='parameter initializer to use.')
+    parser.add_argument('--init_range', type=float, default=0.1,
+                              help='parameters initialized by U(-init_range, init_range)')
+    parser.add_argument('--emb_init_range', type=float, default=0.01,
+                              help='parameters initialized by U(-init_range, init_range)')
+    parser.add_argument('--init_std', type=float, default=0.02,
+                              help='parameters initialized by N(0, init_std)')
+
+    # adaptive-span-transformer parameters
+    parser.add_argument('--attn_span', type=int, default=32,
+                        help='length of the attention span (adaptive-span trs)')
+    parser.add_argument('--adapt_span_params', type=str,
+                        default='adapt_span=False,adapt_span_loss=0.0,adapt_span_ramp=32,adapt_span_init=0.0,adapt_span_cache=False',
+                        help='adaptive span params')
+
+    # parser.add_argument('--adapt_span_params', type=dict,
+    #                     default={"adapt_span": False,
+    #                              "adapt_span_loss": 0.0,
+    #                              "adapt_span_ramp": 32,
+    #                              "adapt_span_init": 0.0,
+    #                              "adapt_span_cache": False},
+    #                     help='adaptive span params (adaptive-span trs)')
+
+    return parser
 
 def main(params):
 
@@ -244,8 +300,15 @@ def main(params):
 
     # build trainer, reload potential checkpoints / build evaluator
     if params.encoder_only:
-        trainer = SingleTrainer(model, data, params)
-        evaluator = SingleEvaluator(trainer, data, params)
+        if 'xl' in params.model_type:
+            trainer = SingleTrainerMem(model, data, params)
+            evaluator = SingleEvaluatorMem(trainer, data, params)
+        elif 'adaptive_span' in params.model_type:
+            trainer = SingleTrainerAdpSpn(model, data, params)
+            evaluator = SingleEvaluatorAdpSpn(trainer, data, params)
+        else:
+            trainer = SingleTrainer(model, data, params)
+            evaluator = SingleEvaluator(trainer, data, params)
     else:
         trainer = EncDecTrainer(encoder, decoder, data, params)
         evaluator = EncDecEvaluator(trainer, data, params)
