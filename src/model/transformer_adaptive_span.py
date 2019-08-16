@@ -19,6 +19,8 @@ from src.model.utils.adaptive_span import AdaptiveSpan
 import ipdb
 import ast
 import numpy as np
+from .memory import HashingMemory
+
 # Size notations:
 # B = batch_size, H = hidden_size, M = block_size, L = attn_span
 
@@ -176,6 +178,39 @@ class TransformerSeqLayer(nn.Module):
         return out
 
 
+class TransformerSeqLayerPKM(nn.Module):
+    def __init__(self, hidden_size, mem_enc_type, params, **kargs):
+        nn.Module.__init__(self)
+        self.attn = MultiHeadSeqAttention(hidden_size=hidden_size, **kargs)
+        self.mem_enc_type = mem_enc_type
+        if 'in' not in mem_enc_type: # FFN used instead of in_memory
+            self.ff = FeedForwardLayer(hidden_size=hidden_size, **kargs)
+        # build memory layer
+        self.memories = nn.ModuleDict()
+        for v in mem_enc_type:
+            self.memories[f'{v}'] = HashingMemory.build(input_dim=hidden_size, output_dim=hidden_size, params=params)
+        self.norm1 = nn.LayerNorm(hidden_size)
+        self.norm2 = nn.LayerNorm(hidden_size)
+
+    def forward(self, h, h_cache, key_pe):
+        # h = B x M x H
+        # h_cache = B x L x H
+        h_all = torch.cat([h_cache, h], dim=1)  # B x (M+L) x H
+        attn_out = self.attn(h, h_all, h_all, key_pe)
+        h = self.norm1(h + attn_out)  # B x M x H
+        if 'in' in self.mem_enc_type:
+            out = self.memories['in'](h)
+        else:
+            assert hasattr(self, 'ff')
+            out = self.ff(h)
+        # ff_out = self.ff(h)
+        out = self.norm2(h + out)  # B x M x H
+
+        if 'after' in self.memories.keys():
+            out = self.memories['after'](out)
+        return out
+
+
 class TransformerModelAdpSpn(nn.Module):
     # def __init__(self, vocab_size, hidden_size, nb_heads, nb_layers,
     #              attn_span, **kargs):
@@ -222,14 +257,31 @@ class TransformerModelAdpSpn(nn.Module):
         # position embeddings
         self.key_pe = nn.Parameter(
             torch.randn(1, hidden_size // nb_heads, attn_span))
-
+        
+        mem_enc_positions_dict = dict()
+        if params.use_memory:
+            for k, v in params.mem_enc_positions:
+                mem_enc_positions_dict.setdefault(k, []).append(v)
+            
         self.layers = nn.ModuleList()
-        self.layers.extend(
-            TransformerSeqLayer(
-                hidden_size=hidden_size, nb_heads=nb_heads,
-                attn_span=attn_span, inner_hidden_size=inner_hid_size,
-                dropout=dropout, adapt_span_params=adapt_span_params, **kargs)
-            for _ in range(nb_layers))
+        for i in range(nb_layers):
+            if i in mem_enc_positions_dict:
+                self.layers.append(
+                    TransformerSeqLayerPKM(
+                        hidden_size=hidden_size, nb_heads=nb_heads,
+                        attn_span=attn_span, inner_hidden_size=inner_hid_size,
+                        dropout=dropout, adapt_span_params=adapt_span_params,
+                        mem_enc_type=mem_enc_positions_dict[i],
+                        params=params,
+                        **kargs)
+                )
+            else:
+                self.layers.append(
+                    TransformerSeqLayer(
+                        hidden_size=hidden_size, nb_heads=nb_heads,
+                        attn_span=attn_span, inner_hidden_size=inner_hid_size,
+                        dropout=dropout, adapt_span_params=adapt_span_params, **kargs)
+                )
 
     def forward(self, x, y, h_cache, eval_only=False, loss_div=1):
         # x size = B x M

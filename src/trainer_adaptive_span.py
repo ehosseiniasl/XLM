@@ -180,11 +180,11 @@ class TrainerAdpSpn(object):
         self.optimizers = {}
 
         # model optimizer (excluding memory values)
-        self.optimizers['model'] = get_optimizer(self.parameters['model'], params.optimizer)
+        self.optimizers['model'] = get_optimizer(self.parameters['model'], params.optimizer, params)
 
         # memory values optimizer
         if params.use_memory:
-            self.optimizers['memory'] = get_optimizer(self.parameters['memory'], params.mem_values_optimizer)
+            self.optimizers['memory'] = get_optimizer(self.parameters['memory'], params.mem_values_optimizer, params)
 
         # log
         logger.info("Optimizers: %s" % ", ".join(self.optimizers.keys()))

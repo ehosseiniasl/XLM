@@ -11,6 +11,7 @@ from .utils import get_knn_faiss, cartesian_product
 from .utils import get_gaussian_keys, get_uniform_keys
 from .query import QueryIdentity, QueryMLP, QueryConv
 
+import ipdb
 
 logger = getLogger()
 

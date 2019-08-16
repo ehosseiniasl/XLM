@@ -11,6 +11,7 @@ import inspect
 
 import torch
 from torch import optim
+from torch.optim import Adagrad
 
 
 class Adam(optim.Optimizer):
@@ -208,7 +209,139 @@ class AdamCosineWithWarmup(Adam):
             param_group['lr'] = self.get_lr_for_step(param_group['num_updates'])
 
 
-def get_optimizer(parameters, s):
+def _clip_grad(clr, grad, group_grad_clip):
+    if group_grad_clip > 0:
+        norm = grad.norm(2).item()
+        if norm > group_grad_clip:
+            clr *= group_grad_clip / (norm + 1e-10)
+    return clr
+
+
+class AdagradWithGradClip(Adagrad):
+    """Adagrad algoritm with custom gradient clipping"""
+    def __init__(self,
+                 params,
+                 lr=1e-2,
+                 lr_decay=0,
+                 weight_decay=0,
+                 initial_accumulator_value=0,
+                 grad_clip=0):
+        Adagrad.__init__(self,
+                         params,
+                         lr=lr,
+                         lr_decay=lr_decay,
+                         weight_decay=weight_decay,
+                         initial_accumulator_value=initial_accumulator_value)
+        self.defaults['grad_clip'] = grad_clip
+        self.param_groups[0].setdefault('grad_clip', grad_clip)
+
+    def step(self, closure=None):
+        loss = None
+        if closure is not None:
+            loss = closure()
+
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+
+                grad = p.grad.data
+                state = self.state[p]
+
+                state['step'] += 1
+
+                if group['weight_decay'] != 0:
+                    if p.grad.data.is_sparse:
+                        raise RuntimeError("weight_decay option is "
+                                           "not compatible with sparse "
+                                           "gradients")
+                    grad = grad.add(group['weight_decay'], p.data)
+
+                clr = (group['lr'] /
+                       (1 + (state['step'] - 1) * group['lr_decay']))
+
+                # clip
+                clr = _clip_grad(clr=clr,
+                                 grad=grad,
+                                 group_grad_clip=group['grad_clip'])
+
+                if grad.is_sparse:
+                    # the update is non-linear so indices must be unique
+                    grad = grad.coalesce()
+                    grad_indices = grad._indices()
+                    grad_values = grad._values()
+                    size = grad.size()
+
+                    def make_sparse(values):
+                        constructor = grad.new
+                        if grad_indices.dim() == 0 or values.dim() == 0:
+                            return constructor().resize_as_(grad)
+                        return constructor(grad_indices, values, size)
+                    state['sum'].add_(make_sparse(grad_values.pow(2)))
+                    std = state['sum']._sparse_mask(grad)
+                    std_values = std._values().sqrt_().add_(1e-10)
+                    p.data.add_(-clr, make_sparse(grad_values / std_values))
+                else:
+                    state['sum'].addcmul_(1, grad, grad)
+                    std = state['sum'].sqrt().add_(1e-10)
+                    p.data.addcdiv_(-clr, grad, std)
+
+        return loss
+
+
+class AdagradInverseSqrtWithWarmup(AdagradWithGradClip):
+    """
+    Decay the LR based on the inverse square root of the update number.
+    We also support a warmup phase where we linearly increase the learning rate
+    from some initial learning rate (`warmup-init-lr`) until the configured
+    learning rate (`lr`). Thereafter we decay proportional to the number of
+    updates, with a decay factor set to align with the configured learning rate.
+    During warmup:
+        lrs = torch.linspace(warmup_init_lr, lr, warmup_updates)
+        lr = lrs[update_num]
+    After warmup:
+        lr = decay_factor / sqrt(update_num)
+    where
+        decay_factor = lr * sqrt(warmup_updates)
+    """
+    def __init__(self, params, lr=1e-3,
+                 weight_decay=0, warmup_updates=4000, warmup_init_lr=1e-7,
+                 exp_factor=0.5, grad_clip=0):
+        super().__init__(
+            params,
+            lr=warmup_init_lr,
+            weight_decay=weight_decay,
+            grad_clip=grad_clip
+        )
+
+        # linearly warmup for the first warmup_updates
+        self.warmup_updates = warmup_updates
+        self.warmup_init_lr = warmup_init_lr
+        warmup_end_lr = lr
+        self.lr_step = (warmup_end_lr - warmup_init_lr) / warmup_updates
+
+        # then, decay prop. to the inverse square root of the update number
+        self.exp_factor = exp_factor
+        self.decay_factor = warmup_end_lr * warmup_updates ** self.exp_factor
+
+        # total number of updates
+        for param_group in self.param_groups:
+            param_group['num_updates'] = 0
+
+    def get_lr_for_step(self, num_updates):
+        if num_updates < self.warmup_updates:
+            return self.warmup_init_lr + num_updates * self.lr_step
+        else:
+            return self.decay_factor * (num_updates ** -self.exp_factor)
+
+    def step(self, closure=None):
+        super().step(closure)
+        for param_group in self.param_groups:
+            param_group['num_updates'] += 1
+            param_group['lr'] = self.get_lr_for_step(param_group['num_updates'])
+
+
+def get_optimizer(parameters, s, params):
     """
     Parse optimizer parameters.
     Input should be of the form:
@@ -231,6 +364,9 @@ def get_optimizer(parameters, s):
         optim_fn = optim.Adadelta
     elif method == 'adagrad':
         optim_fn = optim.Adagrad
+    elif method == 'adagrad_inverse_sqrt':
+        optim_fn = AdagradInverseSqrtWithWarmup
+        optim_params['grad_clip'] = params.clip_grad_norm
     elif method == 'adam':
         optim_fn = Adam
         optim_params['betas'] = (optim_params.get('beta1', 0.9), optim_params.get('beta2', 0.999))
