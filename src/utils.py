@@ -50,9 +50,10 @@ def initialize_exp(params):
     - dump parameters
     - create a logger
     """
-    # dump parameters
-    get_dump_path(params)
-    pickle.dump(params, open(os.path.join(params.dump_path, 'params.pkl'), 'wb'))
+    if params.reload_checkpoint == '':
+        # dump parameters
+        get_dump_path(params)
+        pickle.dump(params, open(os.path.join(params.dump_path, 'params.pkl'), 'wb'))
 
     # get running command
     command = ["python", sys.argv[0]]

@@ -23,6 +23,8 @@ from src.evaluation.evaluator_adaptive_span import SingleEvaluatorAdpSpn, EncDec
 import ipdb
 import numpy as np
 import math
+import os
+import pickle
 
 def get_parser():
     """
@@ -267,6 +269,10 @@ def get_parser():
     parser.add_argument('--adapt_span_params', type=str,
                         default='adapt_span=False,adapt_span_loss=0.0,adapt_span_ramp=32,adapt_span_init=0.0,adapt_span_cache=False',
                         help='adaptive span params')
+    parser.add_argument('--persistent_memory', type=bool, default=False,
+                        help='use persistent memory layer')
+    parser.add_argument('--persistent_memory_pkm', type=bool, default=False,
+                        help='use persistent memory+PKM layer')
 
     # parser.add_argument('--adapt_span_params', type=dict,
     #                     default={"adapt_span": False,
@@ -386,6 +392,17 @@ if __name__ == '__main__':
     # generate parser / parse parameters
     parser = get_parser()
     params = parser.parse_args()
+
+    if params.eval_only:
+        if params.reload_checkpoint != '':
+            print('loading parameters')
+            param_name = os.path.join(os.path.dirname(params.reload_checkpoint), 'params.pkl')
+            with open(param_name, 'rb') as f:
+                params = pickle.load(f)
+                if params.local_rank == 0:
+                    params.local_rank = -1
+            print(f'parameters loaded from {param_name}')
+        params.eval_only = True
 
     # debug mode
     if params.debug:

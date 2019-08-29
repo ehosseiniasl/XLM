@@ -12,7 +12,7 @@ import torch
 import socket
 import signal
 import subprocess
-
+import ipdb
 
 logger = getLogger()
 
@@ -106,6 +106,7 @@ def init_distributed_mode(params):
 
         assert params.master_port == -1
 
+        ipdb.set_trace()
         # read environment variables
         params.global_rank = int(os.environ['RANK'])
         params.world_size = int(os.environ['WORLD_SIZE'])

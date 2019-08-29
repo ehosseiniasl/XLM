@@ -99,6 +99,12 @@ class Evaluator(object):
             subprocess.Popen('mkdir -p %s' % params.hyp_path, shell=True).wait()
             self.create_reference_files()
 
+        self.pred_text = \
+            {
+                'valid': [],
+                'test': []
+            }
+
     def get_iterator(self, data_set, lang1, lang2=None, stream=False):
         """
         Create a new iterator for a dataset.
@@ -304,6 +310,19 @@ class Evaluator(object):
             tensor = model('fwd', x=x, lengths=lengths, positions=positions, langs=langs, causal=True)
             word_scores, loss = model('predict', tensor=tensor, pred_mask=pred_mask, y=y, get_scores=True)
 
+            # generate text
+            ground = []
+            pred = []
+            for i in word_scores.squeeze().max(-1)[1].tolist():
+                pred.append(self.dico.id2word[i])
+            for i in y.squeeze().tolist():
+                ground.append(self.dico.id2word[i])
+            ground_text = ''.join(ground)
+            pred_text = ''.join(pred)
+            ground_text = ' '.join(ground_text.split('_'))
+            pred_text = ' '.join(pred_text.split('_'))
+            # print(f'{loss}\n{ground_text}\n{pred_text}\n\n')
+
             # update stats
             n_words += y.size(0)
             xe_loss += loss.item() * len(y)
@@ -325,6 +344,14 @@ class Evaluator(object):
         if eval_memory:
             for mem_name, mem_att in all_mem_att.items():
                 eval_memory_usage(scores, '%s_%s_%s' % (data_set, l1l2, mem_name), mem_att, params.mem_size)
+
+        # save predictions
+        logger.info("saving generated text")
+        for dset in self.pred_text.keys():
+            with open(os.path.join(self.params.dump_path, f'{dset}_predictions.txt'), 'wt') as f:
+                for lv, gt, pd in self.pred_text[dset]:
+                    # f.write(f'loss: {lv}\nground:{gt}\npred:{pd}\n\n')
+                    f.write(f'{lv}\n{gt}\n{pd}\n\n')
 
     def evaluate_mlm(self, scores, data_set, lang1, lang2):
         """

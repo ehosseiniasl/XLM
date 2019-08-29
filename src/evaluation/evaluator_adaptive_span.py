@@ -109,7 +109,13 @@ class EvaluatorAdpSpn(object):
                 layer.attn.attn.get_cache_size(),
                 self.trainer.model.hidden_size).to(device)
             for layer in self.trainer.model.layers]
-            
+
+        self.pred_text = \
+            {
+            'valid': [],
+            'test': []
+            }
+
     def get_iterator(self, data_set, lang1, lang2=None, stream=False):
         """
         Create a new iterator for a dataset.
@@ -319,6 +325,21 @@ class EvaluatorAdpSpn(object):
             loss, self.hid_cache, word_scores = self.model(input.transpose(1,0), target.transpose(1,0), self.hid_cache)
             loss = loss.float().mean().type_as(loss)
 
+            # generate text
+            ground = []
+            pred = []
+            for i in word_scores.squeeze().max(-1)[1].tolist():
+                pred.append(self.dico.id2word[i])
+            for i in y.squeeze().tolist():
+                ground.append(self.dico.id2word[i])
+            ground_text = ''.join(ground)
+            pred_text = ''.join(pred)
+            ground_text = ' '.join(ground_text.split('_'))
+            pred_text = ' '.join(pred_text.split('_'))
+            # print(f'{loss}\n{ground_text}\n{pred_text}\n\n')
+
+            self.pred_text[data_set].append([loss, ground_text, pred_text])
+
             # update stats
             n_words += y.size(0)
             xe_loss += loss.item() * len(y)
@@ -341,6 +362,14 @@ class EvaluatorAdpSpn(object):
         if eval_memory:
             for mem_name, mem_att in all_mem_att.items():
                 eval_memory_usage(scores, '%s_%s_%s' % (data_set, l1l2, mem_name), mem_att, params.mem_size)
+
+        # save predictions
+        logger.info("saving generated text")
+        for dset in self.pred_text.keys():
+            with open(os.path.join(self.params.dump_path, f'{dset}_predictions.txt'), 'wt') as f:
+                for lv, gt, pd in self.pred_text[dset]:
+                    # f.write(f'loss: {lv}\nground:{gt}\npred:{pd}\n\n')
+                    f.write(f'{lv}\n{gt}\n{pd}\n\n')
 
     def evaluate_mlm(self, scores, data_set, lang1, lang2):
         """

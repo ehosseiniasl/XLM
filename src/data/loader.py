@@ -277,46 +277,52 @@ def check_data_params(params):
     params.n_langs = len(params.langs)
 
     # CLM steps
-    clm_steps = [s.split('-') for s in params.clm_steps.split(',') if len(s) > 0]
-    params.clm_steps = [(s[0], None) if len(s) == 1 else tuple(s) for s in clm_steps]
-    assert all([(l1 in params.langs) and (l2 in params.langs or l2 is None) for l1, l2 in params.clm_steps])
-    assert len(params.clm_steps) == len(set(params.clm_steps))
+    if not isinstance(params.clm_steps, list):
+        clm_steps = [s.split('-') for s in params.clm_steps.split(',') if len(s) > 0]
+        params.clm_steps = [(s[0], None) if len(s) == 1 else tuple(s) for s in clm_steps]
+        assert all([(l1 in params.langs) and (l2 in params.langs or l2 is None) for l1, l2 in params.clm_steps])
+        assert len(params.clm_steps) == len(set(params.clm_steps))
 
     # MLM / TLM steps
-    mlm_steps = [s.split('-') for s in params.mlm_steps.split(',') if len(s) > 0]
-    params.mlm_steps = [(s[0], None) if len(s) == 1 else tuple(s) for s in mlm_steps]
-    assert all([(l1 in params.langs) and (l2 in params.langs or l2 is None) for l1, l2 in params.mlm_steps])
-    assert len(params.mlm_steps) == len(set(params.mlm_steps))
+    if not isinstance(params.mlm_steps, list):
+        mlm_steps = [s.split('-') for s in params.mlm_steps.split(',') if len(s) > 0]
+        params.mlm_steps = [(s[0], None) if len(s) == 1 else tuple(s) for s in mlm_steps]
+        assert all([(l1 in params.langs) and (l2 in params.langs or l2 is None) for l1, l2 in params.mlm_steps])
+        assert len(params.mlm_steps) == len(set(params.mlm_steps))
 
     # parallel classification steps
-    params.pc_steps = [tuple(s.split('-')) for s in params.pc_steps.split(',') if len(s) > 0]
-    assert all([len(x) == 2 for x in params.pc_steps])
-    assert all([l1 in params.langs and l2 in params.langs for l1, l2 in params.pc_steps])
-    assert all([l1 != l2 for l1, l2 in params.pc_steps])
-    assert len(params.pc_steps) == len(set(params.pc_steps))
+    if not isinstance(params.pc_steps, list):
+        params.pc_steps = [tuple(s.split('-')) for s in params.pc_steps.split(',') if len(s) > 0]
+        assert all([len(x) == 2 for x in params.pc_steps])
+        assert all([l1 in params.langs and l2 in params.langs for l1, l2 in params.pc_steps])
+        assert all([l1 != l2 for l1, l2 in params.pc_steps])
+        assert len(params.pc_steps) == len(set(params.pc_steps))
 
     # machine translation steps
-    params.mt_steps = [tuple(s.split('-')) for s in params.mt_steps.split(',') if len(s) > 0]
-    assert all([len(x) == 2 for x in params.mt_steps])
-    assert all([l1 in params.langs and l2 in params.langs for l1, l2 in params.mt_steps])
-    assert all([l1 != l2 for l1, l2 in params.mt_steps])
-    assert len(params.mt_steps) == len(set(params.mt_steps))
-    assert len(params.mt_steps) == 0 or not params.encoder_only
+    if not isinstance(params.mt_steps, list):
+        params.mt_steps = [tuple(s.split('-')) for s in params.mt_steps.split(',') if len(s) > 0]
+        assert all([len(x) == 2 for x in params.mt_steps])
+        assert all([l1 in params.langs and l2 in params.langs for l1, l2 in params.mt_steps])
+        assert all([l1 != l2 for l1, l2 in params.mt_steps])
+        assert len(params.mt_steps) == len(set(params.mt_steps))
+        assert len(params.mt_steps) == 0 or not params.encoder_only
 
     # denoising auto-encoder steps
-    params.ae_steps = [s for s in params.ae_steps.split(',') if len(s) > 0]
-    assert all([lang in params.langs for lang in params.ae_steps])
-    assert len(params.ae_steps) == len(set(params.ae_steps))
-    assert len(params.ae_steps) == 0 or not params.encoder_only
+    if not isinstance(params.ae_steps, list):
+        params.ae_steps = [s for s in params.ae_steps.split(',') if len(s) > 0]
+        assert all([lang in params.langs for lang in params.ae_steps])
+        assert len(params.ae_steps) == len(set(params.ae_steps))
+        assert len(params.ae_steps) == 0 or not params.encoder_only
 
     # back-translation steps
-    params.bt_steps = [tuple(s.split('-')) for s in params.bt_steps.split(',') if len(s) > 0]
-    assert all([len(x) == 3 for x in params.bt_steps])
-    assert all([l1 in params.langs and l2 in params.langs and l3 in params.langs for l1, l2, l3 in params.bt_steps])
-    assert all([l1 == l3 and l1 != l2 for l1, l2, l3 in params.bt_steps])
-    assert len(params.bt_steps) == len(set(params.bt_steps))
-    assert len(params.bt_steps) == 0 or not params.encoder_only
-    params.bt_src_langs = [l1 for l1, _, _ in params.bt_steps]
+    if not isinstance(params.bt_steps, list):
+        params.bt_steps = [tuple(s.split('-')) for s in params.bt_steps.split(',') if len(s) > 0]
+        assert all([len(x) == 3 for x in params.bt_steps])
+        assert all([l1 in params.langs and l2 in params.langs and l3 in params.langs for l1, l2, l3 in params.bt_steps])
+        assert all([l1 == l3 and l1 != l2 for l1, l2, l3 in params.bt_steps])
+        assert len(params.bt_steps) == len(set(params.bt_steps))
+        assert len(params.bt_steps) == 0 or not params.encoder_only
+        params.bt_src_langs = [l1 for l1, _, _ in params.bt_steps]
 
     # check monolingual datasets
     required_mono = set([l1 for l1, l2 in (params.mlm_steps + params.clm_steps) if l2 is None] + params.ae_steps + params.bt_src_langs)

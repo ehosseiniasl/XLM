@@ -20,6 +20,7 @@ import ipdb
 import ast
 import numpy as np
 from .memory import HashingMemory
+from .transformer import PredLayer
 
 # Size notations:
 # B = batch_size, H = hidden_size, M = block_size, L = attn_span
@@ -145,6 +146,58 @@ class MultiHeadSeqAttention(nn.Module):
         return out
 
 
+class MultiHeadSeqAttentionPersistentMem(nn.Module):
+    def __init__(self, hidden_size, nb_heads, inner_hidden_size, **kargs):
+        nn.Module.__init__(self)
+        assert hidden_size % nb_heads == 0
+        self.nb_heads = nb_heads
+        self.head_dim = hidden_size // nb_heads
+        self.attn = SeqAttention(
+            hidden_size=self.head_dim, nb_heads=nb_heads, **kargs)
+        self.proj_query = nn.Linear(hidden_size, hidden_size, bias=False)
+        self.proj_out = nn.Linear(hidden_size, hidden_size, bias=False)
+        self.proj_val = nn.Linear(hidden_size, hidden_size, bias=False)
+        self.proj_key = nn.Linear(hidden_size, hidden_size, bias=False)
+
+        self.persistent_keys = nn.Parameter(torch.randn((1, hidden_size, inner_hidden_size)), requires_grad=True)
+        self.persistent_values = nn.Parameter(torch.randn((1, inner_hidden_size, hidden_size)), requires_grad=True)
+
+    def head_reshape(self, x):
+        K = self.nb_heads
+        D = self.head_dim
+        x = x.view(x.size()[:-1] + (K, D))  # B x (M+L) x K x D
+        x = x.transpose(1, 2).contiguous()  # B x K x (M+L) x D
+        x = x.view(-1, x.size(-2), x.size(-1))  # B_K x (M+L) x D
+        return x
+
+    def forward(self, query, key, value, key_pe):
+
+        B = query.size(0)
+        K = self.nb_heads
+        D = self.head_dim
+        M = query.size(1)
+
+        query = self.proj_query(query)
+        query = self.head_reshape(query)
+        value = self.proj_val(value)
+        value = self.head_reshape(value)
+        key = self.proj_key(key)
+        key = self.head_reshape(key)
+        out = self.attn(query, key, value, key_pe)  # B_K x M x D
+        persistent_keys = self.head_reshape(self.persistent_keys.transpose(-1,-2))
+        persistent_values = self.head_reshape(self.persistent_values)
+        out_persistent = []
+        for i in range(0, query.shape[0], self.nb_heads):
+            out_persistent.append(self.attn(query[i: i+self.nb_heads], persistent_keys, persistent_values, key_pe))
+        out_persistent = torch.cat(out_persistent)
+        out += out_persistent
+        out = out.view(B, K, M, D)  # B x K x M x D
+        out = out.transpose(1, 2).contiguous()  # B x M x K x D
+        out = out.view(B, M, -1)  # B x M x K_D
+        out = self.proj_out(out)
+        return out
+
+
 class FeedForwardLayer(nn.Module):
     def __init__(self, hidden_size, inner_hidden_size, dropout, **kargs):
         nn.Module.__init__(self)
@@ -178,6 +231,26 @@ class TransformerSeqLayer(nn.Module):
         return out
 
 
+class TransformerSeqLayerPersistentMem(nn.Module):
+    def __init__(self, hidden_size, **kargs):
+        nn.Module.__init__(self)
+        self.attn = MultiHeadSeqAttentionPersistentMem(hidden_size=hidden_size, **kargs)
+        # self.ff = FeedForwardLayer(hidden_size=hidden_size, **kargs)
+        self.norm1 = nn.LayerNorm(hidden_size)
+        # self.norm2 = nn.LayerNorm(hidden_size)
+
+    def forward(self, h, h_cache, key_pe):
+        # h = B x M x H
+        # h_cache = B x L x H
+        h_all = torch.cat([h_cache, h], dim=1)  # B x (M+L) x H
+        attn_out = self.attn(h, h_all, h_all, key_pe)
+        h = self.norm1(h + attn_out)  # B x M x H
+        # ff_out = self.ff(h)
+        # out = self.norm2(h + ff_out)  # B x M x H
+        out = h
+        return out
+
+
 class TransformerSeqLayerPKM(nn.Module):
     def __init__(self, hidden_size, mem_enc_type, params, **kargs):
         nn.Module.__init__(self)
@@ -206,6 +279,37 @@ class TransformerSeqLayerPKM(nn.Module):
         # ff_out = self.ff(h)
         out = self.norm2(h + out)  # B x M x H
 
+        if 'after' in self.memories.keys():
+            out = self.memories['after'](out)
+        return out
+
+
+class TransformerSeqLayerPersistentMemPKM(nn.Module):
+    def __init__(self, hidden_size, mem_enc_type, params, **kargs):
+        nn.Module.__init__(self)
+        self.attn = MultiHeadSeqAttentionPersistentMem(hidden_size=hidden_size, **kargs)
+        # self.ff = FeedForwardLayer(hidden_size=hidden_size, **kargs)
+        self.mem_enc_type = mem_enc_type
+        # if 'in' not in mem_enc_type:  # FFN used instead of in_memory
+        #     self.ff = FeedForwardLayer(hidden_size=hidden_size, **kargs)
+        # build memory layer
+        self.memories = nn.ModuleDict()
+        for v in mem_enc_type:
+            self.memories[f'{v}'] = HashingMemory.build(input_dim=hidden_size, output_dim=hidden_size, params=params)
+        self.norm1 = nn.LayerNorm(hidden_size)
+        self.norm2 = nn.LayerNorm(hidden_size)
+
+    def forward(self, h, h_cache, key_pe):
+        # h = B x M x H
+        # h_cache = B x L x H
+        h_all = torch.cat([h_cache, h], dim=1)  # B x (M+L) x H
+        attn_out = self.attn(h, h_all, h_all, key_pe)
+        h = self.norm1(h + attn_out)  # B x M x H
+        # ff_out = self.ff(h)
+        # out = self.norm2(h + ff_out)  # B x M x H
+        if 'in' in self.mem_enc_type:
+            out = self.memories['in'](h)
+        out = self.norm2(h + out)  # B x M x H
         if 'after' in self.memories.keys():
             out = self.memories['after'](out)
         return out
@@ -253,7 +357,10 @@ class TransformerModelAdpSpn(nn.Module):
         self.attn_span = attn_span
 
         self.in_emb = nn.Embedding(vocab_size, hidden_size)
-        self.out_emb = nn.Linear(hidden_size, vocab_size)
+
+        # self.out_emb = nn.Linear(hidden_size, vocab_size)
+        self.out_emb = PredLayer(params) # to use adaptive softmax
+
         # position embeddings
         self.key_pe = nn.Parameter(
             torch.randn(1, hidden_size // nb_heads, attn_span))
@@ -262,10 +369,24 @@ class TransformerModelAdpSpn(nn.Module):
         if params.use_memory:
             for k, v in params.mem_enc_positions:
                 mem_enc_positions_dict.setdefault(k, []).append(v)
-            
+
         self.layers = nn.ModuleList()
         for i in range(nb_layers):
-            if i in mem_enc_positions_dict:
+            if params.persistent_memory:
+                self.layers.append(
+                    TransformerSeqLayerPersistentMem(
+                        hidden_size=hidden_size, nb_heads=nb_heads,
+                        attn_span=attn_span, inner_hidden_size=inner_hid_size,
+                        dropout=dropout, adapt_span_params=adapt_span_params, **kargs)
+                )
+            elif params.persistent_memory_pkm:
+                self.layers.append(
+                    TransformerSeqLayerPersistentMemPKM(
+                        hidden_size=hidden_size, nb_heads=nb_heads,
+                        attn_span=attn_span, inner_hidden_size=inner_hid_size,
+                        dropout=dropout, adapt_span_params=adapt_span_params, **kargs)
+                )
+            elif i in mem_enc_positions_dict:
                 self.layers.append(
                     TransformerSeqLayerPKM(
                         hidden_size=hidden_size, nb_heads=nb_heads,
@@ -300,12 +421,14 @@ class TransformerModelAdpSpn(nn.Module):
             h = layer(h, h_cache[l], self.key_pe)  # B x M x H
 
         # out = F.log_softmax(self.out_emb(h), dim=-1)
-        scores = self.out_emb(h)
-        out = F.log_softmax(scores, dim=-1)
-
+        # scores = self.out_emb(h)
+        # out = F.log_softmax(scores, dim=-1)
         # compute loss
-        out = out.view(-1, out.size(-1))
-        loss = torch.nn.functional.nll_loss(out, y.contiguous().view(-1))
+        # out = out.view(-1, out.size(-1))
+        # loss = torch.nn.functional.nll_loss(out, y.contiguous().view(-1))\
+        scores, loss = self.out_emb(h.reshape(-1,h.shape[-1]), y.reshape(-1), get_scores=True)
+        scores = scores.reshape(*h.shape[:-1], scores.shape[-1])
+
         # loss_value = loss.item() / loss_div
 
         # if not eval_only:

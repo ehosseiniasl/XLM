@@ -377,20 +377,23 @@ class HashingMemory(nn.Module):
         if params.mem_query_layer_sizes == '':
             assert params.mem_heads == 1 or params.mem_use_different_keys or params.mem_shuffle_query
         else:
-            s = [int(x) for x in filter(None, params.mem_query_layer_sizes.split(','))]
-            assert len(s) >= 2 and s[0] == s[-1] == 0
-            params.mem_query_layer_sizes = s
-            assert not params.mem_query_residual or params.mem_input2d
+
+            if not isinstance(params.mem_query_layer_sizes, list):
+                s = [int(x) for x in filter(None, params.mem_query_layer_sizes.split(','))]
+                assert len(s) >= 2 and s[0] == s[-1] == 0
+                params.mem_query_layer_sizes = s
+                assert not params.mem_query_residual or params.mem_input2d
 
         # convolutional query network kernel sizes
         if params.mem_query_kernel_sizes == '':
             assert not params.mem_input2d or params.mem_query_layer_sizes == ''
         else:
             assert params.mem_input2d
-            s = [int(x) for x in filter(None, params.mem_query_kernel_sizes.split(','))]
-            params.mem_query_kernel_sizes = s
-            assert all(ks % 2 == 1 for ks in s)
-            assert len(params.mem_query_kernel_sizes) == len(params.mem_query_layer_sizes) - 1 >= 1
+            if not isinstance(params.mem_input2d, list):
+                s = [int(x) for x in filter(None, params.mem_query_kernel_sizes.split(','))]
+                params.mem_query_kernel_sizes = s
+                assert all(ks % 2 == 1 for ks in s)
+                assert len(params.mem_query_kernel_sizes) == len(params.mem_query_layer_sizes) - 1 >= 1
 
         # scoring
         assert params.mem_score_subtract in ['', 'min', 'mean', 'median']
